@@ -1,0 +1,22 @@
+{
+  "name": "memory-bank-view",
+  "displayName": "Memory Bank View",
+  "description": "Integrated UI for Cline memory-bank",
+  "version": "0.0.1",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "activationEvents": [
+    "onCommand:memoryBank.openView"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "memoryBank.openView",
+        "title": "Open Memory Bank View"
+      }
+    ]
+  }
+}
