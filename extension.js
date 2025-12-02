@@ -13,12 +13,15 @@ function parseFrontmatterAndBody(text) {
   }
 }
 
-function loadMemory(rootPath) {
-  // Support workspaces where the root *is* memory-bank/, or where memory-bank/ is inside the root
-  const isRootMemoryDir = path.basename(rootPath) === 'memory-bank';
-  const memoryDir = isRootMemoryDir ? rootPath : path.join(rootPath, 'memory-bank');
+function loadMemory(rootPath, configPath = 'memory-bank') {
+  // Support both cases:
+  // 1) Workspace root is the repo and memory bank is a subfolder (root/configPath)
+  // 2) Workspace root IS the memory bank folder itself (root basename === configPath)
+  const cfg = String(configPath || 'memory-bank').replace(/\\/g, '/');
+  const isRootMemoryDir = path.basename(rootPath) === cfg;
+  const memoryDir = isRootMemoryDir ? rootPath : path.join(rootPath, cfg);
   const memoryDirExists = fs.existsSync(memoryDir);
-  const watchPattern = isRootMemoryDir ? '**/*.md' : 'memory-bank/**/*.md';
+  const watchPattern = isRootMemoryDir ? '**/*.md' : `${cfg}/**/*.md`;
   if (!memoryDirExists) return { nodes: [], memoryDirExists, rootPath, memoryDir, watchPattern };
 
   const nodes = [];
@@ -39,7 +42,7 @@ function loadMemory(rootPath) {
           parent: frontmatter.parent || '',
           tags: frontmatter.tags || [],
           filePath: full,
-          body
+          body: undefined
         });
       }
     }
@@ -71,6 +74,21 @@ function activate(context) {
     try { currentPanel.reveal(vscode.ViewColumn.Beside); } catch (_) {}
     return true;
   }
+
+  function debounce(fn, ms) {
+    let t;
+    return (...args) => {
+      clearTimeout(t);
+      t = setTimeout(() => fn(...args), ms);
+    };
+  }
+
+  // Settings
+  const cfg = vscode.workspace.getConfiguration('memoryBank');
+  const cfgPath = cfg.get('path', 'memory-bank');
+  const featuresGraphEnabled = cfg.get('features.graphEnabled', true);
+  const featuresMarkdownPreviewEnabled = cfg.get('features.markdownPreviewEnabled', true);
+  const refreshDebounce = cfg.get('refresh.debounceMs', 200);
 
   context.subscriptions.push(
     vscode.commands.registerCommand('memoryBank.openView', () => {
@@ -111,7 +129,7 @@ function activate(context) {
 
       out.appendLine('Opened Memory Bank webview');
 
-      let mem = loadMemory(root);
+      let mem = loadMemory(root, cfgPath);
       let nodes = mem.nodes;
       const update = () => {
         out.appendLine(`Posting init with ${nodes.length} nodes (memoryDirExists=${mem.memoryDirExists}, root=${root})`);
@@ -122,7 +140,11 @@ function activate(context) {
             rootPath: root,
             memoryDirExists: mem.memoryDirExists,
             memoryDir: mem.memoryDir,
-            watchPattern: mem.watchPattern
+            watchPattern: mem.watchPattern,
+            features: {
+              graphEnabled: featuresGraphEnabled,
+              markdownPreviewEnabled: featuresMarkdownPreviewEnabled
+            }
           }
         });
       };
@@ -131,9 +153,11 @@ function activate(context) {
       const watcher = vscode.workspace.createFileSystemWatcher(
         new vscode.RelativePattern(root, mem.watchPattern || 'memory-bank/**/*.md')
       );
-      watcher.onDidChange(uri => { out.appendLine(`Changed: ${uri.fsPath}`); mem = loadMemory(root); nodes = mem.nodes; update(); });
-      watcher.onDidCreate(uri => { out.appendLine(`Created: ${uri.fsPath}`); mem = loadMemory(root); nodes = mem.nodes; update(); });
-      watcher.onDidDelete(uri => { out.appendLine(`Deleted: ${uri.fsPath}`); mem = loadMemory(root); nodes = mem.nodes; update(); });
+      const refresh = () => { mem = loadMemory(root, cfgPath); nodes = mem.nodes; update(); };
+      const debouncedRefresh = debounce(refresh, refreshDebounce);
+      watcher.onDidChange(uri => { out.appendLine(`Changed: ${uri.fsPath}`); debouncedRefresh(); });
+      watcher.onDidCreate(uri => { out.appendLine(`Created: ${uri.fsPath}`); debouncedRefresh(); });
+      watcher.onDidDelete(uri => { out.appendLine(`Deleted: ${uri.fsPath}`); debouncedRefresh(); });
 
       panel.webview.onDidReceiveMessage(async msg => {
         if (msg.type === 'openDevtools') {
@@ -156,6 +180,34 @@ function activate(context) {
         }
         if (msg.type === 'showOutput') {
           out.show(true);
+          return;
+        }
+        if (msg.type === 'openExternal') {
+          const url = (msg.payload && msg.payload.url) || '';
+          try {
+            if (!/^https?:\/\//i.test(url)) {
+              vscode.window.showErrorMessage('Blocked non-http(s) URL');
+              return;
+            }
+            await vscode.env.openExternal(vscode.Uri.parse(url));
+            out.appendLine('[webview] openExternal ' + url);
+          } catch (e) {
+            out.appendLine('[webview] openExternal error ' + (e && e.message ? e.message : String(e)));
+            vscode.window.showErrorMessage('Failed to open external link');
+          }
+          return;
+        }
+        if (msg.type === 'fetchBody') {
+          const id = msg.payload && msg.payload.id;
+          const node = nodes.find(n => n.id === id);
+          if (!node) return;
+          try {
+            const text = fs.readFileSync(node.filePath, 'utf8');
+            const parsed = matter(text);
+            panel.webview.postMessage({ type: 'body', payload: { id, body: parsed.content || '' } });
+          } catch (e) {
+            out.appendLine('[fetchBody error] ' + (e && e.message ? e.message : String(e)));
+          }
           return;
         }
         if (msg.type === 'log') {
@@ -201,7 +253,8 @@ function activate(context) {
 
             const serialized = matter.stringify(newBody, data);
             fs.writeFileSync(node.filePath, serialized, 'utf8');
-            nodes = buildNodes(root);
+            mem = loadMemory(root, cfgPath);
+            nodes = mem.nodes;
             update();
             panel.webview.postMessage({ type: 'saved', payload: { id } });
           } catch (err) {

@@ -8,7 +8,7 @@
     .root { display: flex; gap: 12px; align-items: flex-start; }
     .left { flex: 1 1 auto; min-width: 0; }
     .right { width: 280px; border-left: 1px solid #ccc; padding-left: 8px; overflow: auto; height: 100%; }
-    #graph { min-height: 320px; border: 1px solid #ccc; }
+    #graph { min-height: 320px; border: 1px solid #ccc; width: 100%; }
     #tree div { padding: 2px 0; }
     .badge { background: #eee; border-radius: 8px; padding: 0 6px; font-size: 11px; margin-left: 4px; }
     .pw-section h4 { margin: 8px 0 4px; }
@@ -18,6 +18,25 @@
     #banner.info { background: #eef5ff; color: #114a8b; border-color: #a3c3ff; }
     #devbar { display:flex; gap:6px; align-items:center; font-size:12px; margin-bottom:8px; }
     #devbar button { font-size:12px; padding:2px 6px; }
+    /* Tabular details layout */
+    .kv { display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px; align-items: center; }
+    .kv-row { display: contents; }
+    .kv-label { color: #555; font-weight: 600; }
+    .kv-value input, .kv-value select { width: 100%; }
+    .row-actions { margin-top: 8px; display: flex; gap: 8px; }
+
+    /* Chips / badges */
+    .chip { display: inline-block; padding: 0 6px; border-radius: 10px; background: #eef; color: #114a8b; font-size: 11px; margin-left: 4px; }
+    .chip-prio { background: #ffe9cc; color: #8a4b00; }
+    .pw-item-row { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+    .pw-item-text { flex: 1 1 auto; min-width: 0; }
+    .pw-item-tags { flex: 0 0 auto; white-space: nowrap; }
+
+    /* Tree rows: title + fixed-width percentage column */
+    .tree-row { display: grid; grid-template-columns: 1fr 60px; gap: 8px; align-items: center; padding: 2px 0; }
+    .tree-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+    .tree-pct { text-align: right; color: #666; font-variant-numeric: tabular-nums; width: 60px; }
+    .tree-row.selected .tree-title { font-weight: bold; }
   </style>
 </head>
 <body>
@@ -40,6 +59,17 @@
           <option value="status">Status</option>
           <option value="readiness">Readiness bands</option>
         </select>
+      </div>
+      <div style="margin:6px 0;">
+        <button id="debugToggle" title="Show/Hide debug panel">Debug</button>
+      </div>
+      <div id="debugPanel" style="display:none; border:1px solid #ccc; padding:6px; background:#fafafa;">
+        <div style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
+          <button id="debugReload">Reload view</button>
+          <button id="debugCopy">Copy logs</button>
+          <span id="debugInfo" style="color:#555; font-size:12px;"></span>
+        </div>
+        <pre id="debugLog" style="max-height:160px; overflow:auto; background:#fff; border:1px solid #ddd; padding:6px; margin:0;"></pre>
       </div>
       <div id="tree"></div>
       <hr>

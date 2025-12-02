@@ -29,7 +29,33 @@
         "command": "memoryBank.showOutput",
         "title": "Memory Bank: Show Output Channel"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Memory Bank",
+      "properties": {
+        "memoryBank.path": {
+          "type": "string",
+          "default": "memory-bank",
+          "description": "Relative path to the memory bank folder within the workspace."
+        },
+        "memoryBank.features.graphEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable the simple neighbor graph in the webview."
+        },
+        "memoryBank.features.markdownPreviewEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable markdown preview rendering in the details pane."
+        },
+        "memoryBank.refresh.debounceMs": {
+          "type": "number",
+          "default": 200,
+          "minimum": 0,
+          "description": "Debounce interval (ms) for file watcher refresh updates."
+        }
+      }
+    }
   },
   "dependencies": {
     "dompurify": "^3.3.0",

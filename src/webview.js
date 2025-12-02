@@ -16,8 +16,40 @@
   const progressWidget = document.getElementById('progressWidget');
   const banner = document.getElementById('banner');
   const devbar = document.getElementById('devbar');
+  let features = { graphEnabled: true, markdownPreviewEnabled: true };
+  let graphRaf = null;
+
+  // Restore UI state (selected node, filter, groupBy)
+  let __state = {};
+  try { __state = vscode.getState ? (vscode.getState() || {}) : {}; } catch(_) { __state = {}; }
+  if (filter && __state.filter) filter.value = __state.filter;
+  if (groupBySel && __state.groupBy) groupBySel.value = __state.groupBy;
+  if (__state.selected) selected = __state.selected;
+
+  function saveState() {
+    try {
+      const st = {
+        selected,
+        filter: filter ? filter.value : '',
+        groupBy: groupBySel ? groupBySel.value : 'none'
+      };
+      vscode.setState && vscode.setState(st);
+    } catch (_) {}
+  }
 
   function postLog(level, message, error) {
+    // Append to in-view debug log (if visible)
+    try {
+      const dbg = document.getElementById('debugLog');
+      if (dbg) {
+        const line = `[${level}] ${String(message || '')}`;
+        dbg.textContent += (dbg.textContent ? '\n' : '') + line;
+        dbg.scrollTop = dbg.scrollHeight;
+      }
+      const info = document.getElementById('debugInfo');
+      if (info) info.textContent = new Date().toLocaleTimeString();
+    } catch (_) {}
+    // Relay to extension OutputChannel
     try {
       vscode.postMessage({
         type: 'log',
@@ -60,12 +92,23 @@
   });
 
   window.onerror = function(message, source, lineno, colno, error) {
-    showBanner(`Error: ${message} (${source}:${lineno}:${colno})`);
-    postLog('error', `${message} at ${source}:${lineno}:${colno}`, error);
+    const msg = String(message || '');
+    // Ignore benign ResizeObserver loop warnings that VS Code webviews often emit
+    if (/ResizeObserver loop (limit exceeded|completed with undelivered notifications)/i.test(msg)) {
+      postLog('warn', msg + ` at ${source}:${lineno}:${colno}`);
+      return true; // handled; suppress banner
+    }
+    showBanner(`Error: ${msg} (${source}:${lineno}:${colno})`);
+    postLog('error', `${msg} at ${source}:${lineno}:${colno}`, error);
     return false;
   };
   window.addEventListener('unhandledrejection', function(ev) {
     const reason = ev && ev.reason ? (ev.reason.message || String(ev.reason)) : 'unhandledrejection';
+    // Suppress noisy ResizeObserver loop warnings
+    if (/ResizeObserver loop (limit exceeded|completed with undelivered notifications)/i.test(String(reason || ''))) {
+      postLog('warn', `Unhandled rejection (ignored): ${reason}`);
+      return;
+    }
     showBanner(`Unhandled promise rejection: ${reason}`);
     postLog('error', `Unhandled rejection: ${reason}`, ev && ev.reason);
   });
@@ -99,21 +142,97 @@
   function renderProgressWidget() {
     if (!progressWidget) return;
     const p = findProgressNode();
+    if (p && typeof p.body === 'undefined') {
+      progressWidget.innerHTML = '<div style="color:#777;">Loading…</div>';
+      try { vscode.postMessage({ type: 'fetchBody', payload: { id: p.id } }); } catch (_) {}
+      return;
+    }
     let html = '';
     if (p) {
-      const backlog = sectionLinesFrom(p.body, 'Backlog');
-      const inprog = sectionLinesFrom(p.body, 'In Progress');
-      const done = sectionLinesFrom(p.body, 'Done');
-      const log = sectionLinesFrom(p.body, 'Log');
+      const backlogRaw = sectionLinesFrom(p.body, 'Backlog');
+      const inprogRaw = sectionLinesFrom(p.body, 'In Progress');
+      const doneRaw = sectionLinesFrom(p.body, 'Done');
+      const logRaw = sectionLinesFrom(p.body, 'Log');
 
-      const mkList = (arr, act) => {
+      // Build subsystem lookup for tagging
+      const subs = nodes.filter(n => (n.type || '').toLowerCase() === 'subsystem');
+      const subLookup = new Map();
+      subs.forEach(s => {
+        subLookup.set((s.id || '').toLowerCase(), s);
+        subLookup.set((s.title || '').toLowerCase(), s);
+        const parts = (s.id || '').toLowerCase().split(/[-_ ]+/);
+        parts.forEach(pt => { if (pt) subLookup.set(pt, s); });
+      });
+      // Some generic synonyms -> best guess subsystem
+      function synonymToSub(key) {
+        const k = key.toLowerCase();
+        if (k.includes('graph')) return subs.find(s => /graph/.test((s.id||'')+(s.title||'')));
+        if (k.includes('webview')) return subs.find(s => /webview/.test((s.id||'')+(s.title||'')));
+        if (k.includes('file')) return subs.find(s => /file-?io/.test((s.id||'')+(s.title||'')));
+        if (k.includes('tree')) return subs.find(s => /tree/.test((s.id||'')+(s.title||'')));
+        if (k.includes('cline')) return subs.find(s => /cline/.test((s.id||'')+(s.title||'')));
+        return undefined;
+      }
+
+      function parsePrio(t) {
+        const m = t.match(/\bP([1-3])\b|\[(P[1-3])\]|\(P([1-3])\)/i);
+        if (!m) return null;
+        const g = (m[1] || (m[2] && m[2].slice(1)) || m[3] || '').toUpperCase();
+        if (!g) return null;
+        return g; // 'P1' | 'P2' | 'P3'
+      }
+      function stripPrio(t) {
+        return t.replace(/\s*\[(P[1-3])\]\s*|\s*\(P[1-3]\)\s*|\bP[1-3]\b\s*:?/ig, '').trim();
+      }
+      function detectTags(t) {
+        const tags = new Map();
+        const lower = t.toLowerCase();
+        // direct id/title and word parts
+        for (const key of subLookup.keys()) {
+          if (!key) continue;
+          if (lower.includes(key)) {
+            const sub = subLookup.get(key);
+            if (sub) tags.set(sub.id, sub);
+          }
+        }
+        // synonyms
+        const syn = synonymToSub(lower);
+        if (syn) tags.set(syn.id, syn);
+        return Array.from(tags.values());
+      }
+
+      function renderChip(txt, cls) {
+        return `<span class="chip${cls ? ' ' + cls : ''}">${escapeHtml(txt)}</span>`;
+      }
+
+      function mkList(arr, act) {
         if (!arr || arr.length === 0) return '<div style="color:#777;">(empty)</div>';
-        return arr.slice(0, 6).map((t, i) => `
-          <div class="pw-item" data-act="${act}" data-text="${escapeHtml(t)}">
-            ${escapeHtml(t)}
-          </div>
-        `).join('');
-      };
+
+        const items = arr.map(t => {
+          const pr = parsePrio(t);           // 'P1' | 'P2' | 'P3' | null
+          const clean = stripPrio(t);        // without priority marker
+          const tagSubs = detectTags(clean); // array of subsystems
+          return { t, clean, pr, prRank: pr ? Number(pr.slice(1)) : 99, tagSubs };
+        });
+
+        // Sort: P1 -> P2 -> P3 -> none; then with tags first
+        items.sort((a, b) => (a.prRank - b.prRank) || ((b.tagSubs.length) - (a.tagSubs.length)));
+
+        return items.slice(0, 12).map(it => {
+          const right = [
+            it.pr ? renderChip(it.pr, 'chip-prio') : '',
+            ...it.tagSubs.map(s => `<span class="chip" data-id="${escapeHtml(s.id)}">${escapeHtml(s.title || s.id)}</span>`)
+          ].filter(Boolean).join(' ');
+          return `
+            <div class="pw-item-row">
+              <div class="pw-item-text pw-item" data-act="${act}" data-text="${escapeHtml(it.clean)}">
+                ${escapeHtml(it.clean)}
+              </div>
+              <div class="pw-item-tags">${right}</div>
+            </div>
+          `;
+        }).join('');
+      }
 
       // Summary by status
       const byStatus = nodes.reduce((acc, n) => {
@@ -133,19 +252,19 @@
         </div>
         <div class="pw-section">
           <h4>Backlog</h4>
-          ${mkList(backlog, 'filter')}
+          ${mkList(backlogRaw, 'filter')}
         </div>
         <div class="pw-section">
           <h4>In Progress</h4>
-          ${mkList(inprog, 'filter')}
+          ${mkList(inprogRaw, 'filter')}
         </div>
         <div class="pw-section">
           <h4>Done (recent)</h4>
-          ${mkList(done, 'explain')}
+          ${mkList(doneRaw, 'explain')}
         </div>
         <div class="pw-section">
           <h4>Log (recent)</h4>
-          ${mkList(log, 'explain')}
+          ${mkList(logRaw, 'explain')}
         </div>
         <div id="progressExplain" style="margin-top:8px;"></div>
       `;
@@ -193,12 +312,18 @@
 
     if (mode === 'none') {
       filtered.forEach(n => {
-        const div = document.createElement('div');
-        div.textContent = `${n.title} ${statusIcon(n.status)} ${fmtReadiness(n.readiness)}`;
-        div.style.cursor = 'pointer';
-        if (n.id === selected) div.style.fontWeight = 'bold';
-        div.onclick = () => select(n.id);
-        tree.appendChild(div);
+        const row = document.createElement('div');
+        row.className = 'tree-row' + (n.id === selected ? ' selected' : '');
+        const title = document.createElement('div');
+        title.className = 'tree-title';
+        title.textContent = `${n.title} ${statusIcon(n.status)}`;
+        title.onclick = () => select(n.id);
+        const pct = document.createElement('div');
+        pct.className = 'tree-pct';
+        pct.textContent = fmtReadiness(n.readiness);
+        row.appendChild(title);
+        row.appendChild(pct);
+        tree.appendChild(row);
       });
       return;
     }
@@ -218,19 +343,26 @@
       tree.appendChild(header);
 
       groups.get(key).forEach(n => {
-        const div = document.createElement('div');
-        div.textContent = `${n.title} ${statusIcon(n.status)} ${fmtReadiness(n.readiness)}`;
-        div.style.cursor = 'pointer';
-        div.style.marginLeft = '8px';
-        if (n.id === selected) div.style.fontWeight = 'bold';
-        div.onclick = () => select(n.id);
-        tree.appendChild(div);
+        const row = document.createElement('div');
+        row.className = 'tree-row' + (n.id === selected ? ' selected' : '');
+        row.style.marginLeft = '8px';
+        const title = document.createElement('div');
+        title.className = 'tree-title';
+        title.textContent = `${n.title} ${statusIcon(n.status)}`;
+        title.onclick = () => select(n.id);
+        const pct = document.createElement('div');
+        pct.className = 'tree-pct';
+        pct.textContent = fmtReadiness(n.readiness);
+        row.appendChild(title);
+        row.appendChild(pct);
+        tree.appendChild(row);
       });
     });
   }
 
   function select(id) {
     selected = id;
+    saveState();
     try { renderTree(); } catch (e) { showBanner('renderTree failed'); postLog('error', 'renderTree failed', e); }
     try { renderDetails(); } catch (e) { showBanner('renderDetails failed'); postLog('error', 'renderDetails failed', e); }
     try { renderGraph(); } catch (e) { showBanner('renderGraph failed'); postLog('error', 'renderGraph failed', e); }
@@ -243,26 +375,57 @@
     details.innerHTML = `
       <div id="err" style="color:#d33;"></div>
       <div id="ok" style="color:#090;"></div>
-      <div><b>ID:</b> ${n.id}</div>
-      <div><b>Title:</b> <input id="t" value="${n.title}"></div>
-      <div><b>Status:</b>
-        <select id="s">
-          <option value="planned"${n.status==='planned'?' selected':''}>planned</option>
-          <option value="in-progress"${n.status==='in-progress'?' selected':''}>in-progress</option>
-          <option value="blocked"${n.status==='blocked'?' selected':''}>blocked</option>
-          <option value="done"${n.status==='done'?' selected':''}>done</option>
-        </select>
+
+      <div class="kv">
+        <div class="kv-row">
+          <div class="kv-label">ID</div>
+          <div class="kv-value"><code>${n.id}</code></div>
+        </div>
+        <div class="kv-row">
+          <div class="kv-label">Title</div>
+          <div class="kv-value"><input id="t" value="${n.title}"></div>
+        </div>
+        <div class="kv-row">
+          <div class="kv-label">Status</div>
+          <div class="kv-value">
+            <select id="s">
+              <option value="planned"${n.status==='planned'?' selected':''}>planned</option>
+              <option value="in-progress"${n.status==='in-progress'?' selected':''}>in-progress</option>
+              <option value="blocked"${n.status==='blocked'?' selected':''}>blocked</option>
+              <option value="done"${n.status==='done'?' selected':''}>done</option>
+            </select>
+          </div>
+        </div>
+        <div class="kv-row">
+          <div class="kv-label">Readiness (0–1)</div>
+          <div class="kv-value"><input id="r" type="number" min="0" max="1" step="0.01" value="${n.readiness}"></div>
+        </div>
+        <div class="kv-row">
+          <div class="kv-label">Tags</div>
+          <div class="kv-value">${Array.isArray(n.tags) ? n.tags.map(t => `<span class="chip">${escapeHtml(t)}</span>`).join(' ') : ''}</div>
+        </div>
       </div>
-      <div><b>Readiness (0-1):</b> <input id="r" type="number" min="0" max="1" step="0.01" value="${n.readiness}"></div>
-      <div><b>Content:</b><div id="preview" style="border:1px solid #ccc;padding:8px;margin-top:6px;"></div></div>
-      <button id="save">Save</button>
-      <button id="open">Open File</button>
+
+      <div class="row-actions">
+        <button id="save">Save</button>
+        <button id="open">Open File</button>
+      </div>
+
+      <div style="margin-top:8px;">
+        <b>Content</b>
+        <div id="preview" style="border:1px solid #ccc;padding:8px;margin-top:6px;"></div>
+      </div>
     `;
 
     const err = document.getElementById('err');
     const target = document.getElementById('preview');
+    if (typeof n.body === 'undefined') {
+      try { target.textContent = '(loading…)'; } catch (_) {}
+      try { vscode.postMessage({ type: 'fetchBody', payload: { id: n.id } }); } catch (_) {}
+      return;
+    }
     try {
-      if (window.marked && typeof marked.parse === 'function') {
+      if (features.markdownPreviewEnabled && window.marked && typeof marked.parse === 'function') {
         let html = marked.parse(n.body || '');
         if (window.DOMPurify && typeof DOMPurify.sanitize === 'function') {
           html = DOMPurify.sanitize(html);
@@ -315,10 +478,16 @@
   function renderGraph() {
     const n = byId[selected];
     if (!n) { graph.innerHTML = ''; return; }
+    if (!features.graphEnabled) { graph.innerHTML = ''; return; }
 
     const width = graph.clientWidth || 600;
     if (!graph.clientWidth) { try { postLog('warn', 'graph.clientWidth is 0; using fallback 600'); } catch (_) {} }
     const height = 300;
+    if (width < 10 || height < 50) {
+      try { showBanner('Graph area too small; resize the view', 'info'); } catch (_) {}
+      graph.innerHTML = '';
+      return;
+    }
     const centerX = Math.floor(width / 2);
     const centerY = Math.floor(height / 2);
 
@@ -426,11 +595,44 @@
     graph.appendChild(svg);
   }
 
-  filter.oninput = renderTree;
-  if (groupBySel) groupBySel.onchange = renderTree;
+  filter.oninput = () => { saveState(); renderTree(); };
+  if (groupBySel) groupBySel.onchange = () => { saveState(); renderTree(); };
+
+  // Link handling in details preview: internal routes vs external open
+  if (details) {
+    details.addEventListener('click', ev => {
+      const a = ev.target && ev.target.closest ? ev.target.closest('a') : null;
+      if (!a) return;
+      const href = a.getAttribute('href') || '';
+      if (!href) return;
+
+      // External http(s)
+      if (/^https?:\/\//i.test(href)) {
+        ev.preventDefault();
+        vscode.postMessage({ type: 'openExternal', payload: { url: href } });
+        return;
+      }
+
+      // Internal: try id or filename -> id
+      let targetId = href.replace(/^#/, '').replace(/\.md$/i, '');
+      if (targetId && byId[targetId]) {
+        ev.preventDefault();
+        select(targetId);
+      }
+    });
+  }
 
   if (rightbar) {
     rightbar.addEventListener('click', ev => {
+      // Chip navigation to subsystem
+      const chip = ev.target.closest('.chip');
+      if (chip && chip.getAttribute && chip.getAttribute('data-id')) {
+        const id = chip.getAttribute('data-id');
+        if (id && byId[id]) {
+          select(id);
+          return;
+        }
+      }
       const t = ev.target.closest('.pw-item');
       if (!t) return;
       const act = t.getAttribute('data-act');
@@ -482,6 +684,45 @@
     });
   }
 
+  // Debug panel controls
+  const debugToggle = document.getElementById('debugToggle');
+  if (debugToggle) {
+    debugToggle.addEventListener('click', () => {
+      const pane = document.getElementById('debugPanel');
+      if (!pane) return;
+      pane.style.display = pane.style.display === 'none' ? 'block' : 'none';
+    });
+  }
+  const debugReload = document.getElementById('debugReload');
+  if (debugReload) debugReload.addEventListener('click', () => vscode.postMessage({ type: 'reloadWebview' }));
+  const debugCopy = document.getElementById('debugCopy');
+  if (debugCopy) debugCopy.addEventListener('click', async () => {
+    try {
+      const dbg = document.getElementById('debugLog');
+      const text = dbg ? dbg.textContent : '';
+      await navigator.clipboard.writeText(text || '');
+      showBanner('Debug log copied', 'info');
+      setTimeout(hideBanner, 1200);
+    } catch (_) {
+      showBanner('Copy failed');
+    }
+  });
+
+  // Re-render graph on resize
+  if (window.ResizeObserver && graph) {
+    const ro = new ResizeObserver(() => {
+      if (selected) {
+        if (graphRaf == null) {
+          graphRaf = requestAnimationFrame(() => {
+            graphRaf = null;
+            try { renderGraph(); } catch (e) { postLog('error', 'renderGraph resize', e); }
+          });
+        }
+      }
+    });
+    ro.observe(graph);
+  }
+
   window.addEventListener('message', e => {
     if (e.data.type === 'init') {
       postLog('info', 'init received: ' + ((e.data && e.data.payload && e.data.payload.nodes && e.data.payload.nodes.length) || 0) + ' nodes');
@@ -489,10 +730,13 @@
       rootPath = e.data.payload.rootPath || '';
       memoryDirExists = !!e.data.payload.memoryDirExists;
       memoryDir = e.data.payload.memoryDir || '';
+      features = Object.assign({ graphEnabled: true, markdownPreviewEnabled: true }, (e.data.payload && e.data.payload.features) || {});
       byId = Object.fromEntries(nodes.map(n => [n.id, n]));
       renderTree();
-      // Auto-select first item to ensure diagram is visible on load
-      if (!selected && nodes.length) {
+      // Restore selection from state if valid; else auto-select first
+      if (selected && byId[selected]) {
+        select(selected);
+      } else if (nodes.length) {
         select(nodes[0].id);
       } else {
         renderGraph();
@@ -507,6 +751,20 @@
         }
       }
       renderProgressWidget();
+    } else if (e.data.type === 'body') {
+      const id = e.data.payload && e.data.payload.id;
+      const body = e.data.payload && e.data.payload.body;
+      if (id && byId[id]) {
+        byId[id].body = body || '';
+        if (selected === id) {
+          try { renderDetails(); } catch (e) { postLog('error', 'renderDetails failed after body load', e); }
+        }
+        // If progress log arrived, refresh the sidebar
+        const p = findProgressNode();
+        if (p && p.id === id) {
+          try { renderProgressWidget(); } catch (e) { postLog('error', 'renderProgressWidget after body load', e); }
+        }
+      }
     }
   });
 

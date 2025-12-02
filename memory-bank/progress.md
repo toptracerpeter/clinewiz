@@ -2,20 +2,29 @@
 id: progress-log
 type: progress
 status: in-progress
-readiness: 0.45
+readiness: 0.70
 parent: cline-memory-bank-extension
 tags: [progress, kanban]
 ---
 # Progress
 
 ## Backlog
-- Additional badges in list; optional grouping by readiness bands
-- Error surfacing UI polish (inline messages, edge cases)
-- Simple graph visualization (Mermaid/D3) optional
-- Package + README polish
+- Regression test: memoryBank.path handling when workspace root is memory-bank; ensure no duplicated path or watcher pattern
+- Persist UI state (selected node, filter, groupBy) via webview state
+- Settings/configuration: memoryBank.path, features.graphEnabled/markdownPreviewEnabled, refresh.debounceMs
+- Lazy-load bodies: frontmatter-only init; fetchBody on selection; per-file cache
+- Keyboard navigation and ARIA roles/labels; focus management
+- Error surfacing polish: inline messages and banner actions (Retry, Open file); OutputChannel prefixes
+- Performance: cache frontmatter, batch updates to webview, avoid re-render storms
+- Documentation: README quickstart, features, settings, troubleshooting, screenshots/GIFs
+- Packaging: version bump, CHANGELOG, .vsix
+- Testing: unit tests (frontmatter round-trip, validation), manual smoke/e2e checklist
+- CI workflow: lint/format, vsce package, artifact upload
+- Optional: Mermaid/D3 visualization variant
 
 ## In Progress
-- Design frontmatter schema and conventions (this file plus systemPatterns.md)
+- UI state persistence and settings wiring
+- Plan and scaffold for lazy-load of markdown bodies (fetch on select)
 
 ## Done
 - README architecture captured as projectbrief.md
@@ -33,6 +42,18 @@ tags: [progress, kanban]
 - Interactive SVG diagram with clickable parent/child nodes
 - DOMPurify-sanitized markdown preview
 - Readiness band grouping and type badges in list
+- Observability: extension OutputChannel; webview console/error relay; status bar ping on error
+- Visible error banner in Webview; Debug pane (toggle, reload, copy logs; devtools/output shortcuts)
+- Graph robustness: width: 100%, ResizeObserver re-render, zero-size guard/banner
+- Debounced file watcher updates in extension (200ms)
+- Link handling: internal routing (select node); external links via openExternal
+- Improved init payload: rootPath/memoryDir/watchPattern; clearer zero-nodes messaging
+- Workspace flexibility: support memory-bank as workspace root or subfolder
+- UI polish: details pane uses tabular layout (grid rows) with clearer labels and tag chips
+- Progress sidebar: prioritized Backlog (P1/P2/P3) and subsystem badges with clickable chip navigation
+- Topic list (left): tabulated rows with fixed-width percentage column for aligned presentation
+- Progress sidebar: lazy-load of progress.md body with loading state; lists render reliably after fetch
+- ResizeObserver noise: suppressed benign loop warnings; re-render now scheduled via requestAnimationFrame to avoid errors
 
 ## Log
 - 2025-11-26: Initialized memory bank plan and structure.
@@ -41,3 +62,9 @@ tags: [progress, kanban]
 - 2025-11-27: Added markdown preview rendering, neighbor navigation, list status icons + readiness, and client-side validation in Webview.
 - 2025-11-27: Added grouping (type/status), status dropdown, readiness constraints, and saved notification in details.
 - 2025-11-27: Implemented interactive SVG diagram (clickable nodes) and sanitized markdown preview; added readiness band grouping and type badges.
+- 2025-12-02: Added OutputChannel logging and webview log relay; global error hooks with banner; Debug tools (toggle/copy/reload/devtools/output).
+- 2025-12-02: Graph hardened (width:100%, ResizeObserver, zero-size guard); debounced watcher updates; internal/external link handling.
+- 2025-12-02: Webview init now includes root/memoryDir info; clearer messaging for missing memory-bank; support memory-bank as workspace root or subfolder.
+- 2025-12-02: UI polish—tabular details layout; prioritized Backlog (P1/P2/P3) with subsystem badges and chip navigation.
+- 2025-12-02: Fixed regression for duplicated memory-bank path when workspace root is memory-bank; normalized loadMemory and watcher pattern; added backlog item for regression test.
+- 2025-12-02: UI tabulation for topic list (aligned percentages), ensured Progress lists load (lazy fetch), and suppressed top ResizeObserver error via rAF + ignore rule.
