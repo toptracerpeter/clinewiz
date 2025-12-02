@@ -238,6 +238,14 @@ Use this extension in another VS Code project
 code --install-extension /path/to/memory-bank-view-0.0.1.vsix
 ```
 - Open a workspace that contains a memory-bank/ folder (or add one).
+
+## Development & Observability
+
+- Launch in an Extension Development Host: F5 → “Run Extension” (or Run and Debug → Launch Extension). Keep a terminal open with any bundler/watch scripts you prefer; the webview JS here is plain ES5 and doesn’t need a build step.
+- Use the in-webview Dev bar (top of the UI): “Show Output” opens the extension Output Channel, “Open Devtools” triggers `workbench.action.webview.openDeveloperTools`, and “Reload Webview” refreshes the panel without restarting the host.
+- Command Palette helpers (only when the Memory Bank view has been opened): `Memory Bank: Show Output Channel`, `Memory Bank: Open Webview Devtools`, `Memory Bank: Reload Webview`.
+- Error capture: webview `console` is piped into the Output Channel. Unhandled errors and promise rejections also show a banner in the webview so you don’t miss silent failures.
+- File system watcher reload: changes under `memory-bank/**/*.md` automatically rebuild the node graph and re-post to the webview.
 - Run the command “Open Memory Bank View” from the Command Palette.
 - Updating: repackage and reinstall with --force:
 ```bash

@@ -1,8 +1,8 @@
 ---
 id: system-patterns
 type: guidelines
-status: planned
-readiness: 0.2
+status: in-progress
+readiness: 0.3
 parent: cline-memory-bank-extension
 tags: [conventions, schema]
 ---

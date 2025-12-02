@@ -2,18 +2,58 @@
 <html>
 <head>
   <meta charset="UTF-8">
+  %CSP%
   <title>Memory Bank</title>
+  <style>
+    .root { display: flex; gap: 12px; align-items: flex-start; }
+    .left { flex: 1 1 auto; min-width: 0; }
+    .right { width: 280px; border-left: 1px solid #ccc; padding-left: 8px; overflow: auto; height: 100%; }
+    #graph { min-height: 320px; border: 1px solid #ccc; }
+    #tree div { padding: 2px 0; }
+    .badge { background: #eee; border-radius: 8px; padding: 0 6px; font-size: 11px; margin-left: 4px; }
+    .pw-section h4 { margin: 8px 0 4px; }
+    .pw-item { cursor: pointer; padding: 2px 0; }
+    .pw-item:hover { text-decoration: underline; }
+    #banner { position: sticky; top: 0; background: #fee; color: #900; border: 1px solid #d99; padding: 6px; display: none; z-index: 1; }
+    #banner.info { background: #eef5ff; color: #114a8b; border-color: #a3c3ff; }
+    #devbar { display:flex; gap:6px; align-items:center; font-size:12px; margin-bottom:8px; }
+    #devbar button { font-size:12px; padding:2px 6px; }
+  </style>
 </head>
 <body>
-  <div>
-    <h2>Memory Bank</h2>
-    <input id="filter" placeholder="Filter">
-    <div id="tree"></div>
-    <hr>
-    <div id="details"></div>
-    <hr>
-    <div id="graph"></div>
+  <div id="banner" role="alert"></div>
+  <div id="devbar">
+    <strong>Dev:</strong>
+    <button data-act="output">Show Output</button>
+    <button data-act="devtools">Open Devtools</button>
+    <button data-act="reload">Reload Webview</button>
   </div>
-  <script src="%WEBVIEW_JS%"></script>
+  <div class="root">
+    <div class="left">
+      <h2>Memory Bank</h2>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <input id="filter" placeholder="Filter">
+        <label for="groupBy">Group by:</label>
+        <select id="groupBy">
+          <option value="none">None</option>
+          <option value="type">Type</option>
+          <option value="status">Status</option>
+          <option value="readiness">Readiness bands</option>
+        </select>
+      </div>
+      <div id="tree"></div>
+      <hr>
+      <div id="details"></div>
+      <hr>
+      <div id="graph"></div>
+    </div>
+    <div class="right" id="rightbar">
+      <h3 style="margin:4px 0 8px;">Progress</h3>
+      <div id="progressWidget"></div>
+    </div>
+  </div>
+  <script nonce="%NONCE%" src="%MARKED_URI%"></script>
+  <script nonce="%NONCE%" src="%DOMPURIFY_URI%"></script>
+  <script nonce="%NONCE%" src="%WEBVIEW_JS%"></script>
 </body>
 </html>

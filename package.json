@@ -16,7 +16,24 @@
       {
         "command": "memoryBank.openView",
         "title": "Open Memory Bank View"
+      },
+      {
+        "command": "memoryBank.openDevtools",
+        "title": "Memory Bank: Open Webview Devtools"
+      },
+      {
+        "command": "memoryBank.reloadWebview",
+        "title": "Memory Bank: Reload Webview"
+      },
+      {
+        "command": "memoryBank.showOutput",
+        "title": "Memory Bank: Show Output Channel"
       }
     ]
+  },
+  "dependencies": {
+    "dompurify": "^3.3.0",
+    "gray-matter": "^4.0.3",
+    "marked": "^17.0.1"
   }
 }
