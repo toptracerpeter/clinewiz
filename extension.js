@@ -68,6 +68,25 @@ function activate(context) {
   const out = vscode.window.createOutputChannel('Memory Bank');
   context.subscriptions.push(out);
   let currentPanel = null;
+  const dateIso = () => new Date().toISOString().slice(0, 10);
+
+  function appendToSection(body, title, line) {
+    const safeBody = body || '';
+    const headingRe = new RegExp(`(^|\\n)(##\\s+${title}\\s*\\n)`, 'i');
+    const m = safeBody.match(headingRe);
+    if (m && m.index !== undefined) {
+      const startIdx = m.index + m[0].length;
+      const rest = safeBody.slice(startIdx);
+      const nextHeadingIdx = rest.search(/\n##\s+/);
+      if (nextHeadingIdx >= 0) {
+        const before = safeBody.slice(0, startIdx + nextHeadingIdx);
+        const after = safeBody.slice(startIdx + nextHeadingIdx);
+        return `${before}- ${line}\n${after}`;
+      }
+      return safeBody + (safeBody.endsWith('\n') ? '' : '\n') + `- ${line}\n`;
+    }
+    return safeBody + (safeBody.endsWith('\n') ? '' : '\n') + `\n## ${title}\n- ${line}\n`;
+  }
 
   function revealPanel() {
     if (!currentPanel) return false;
@@ -160,6 +179,10 @@ function activate(context) {
       watcher.onDidDelete(uri => { out.appendLine(`Deleted: ${uri.fsPath}`); debouncedRefresh(); });
 
       panel.webview.onDidReceiveMessage(async msg => {
+        if (msg.type === 'ready') {
+          update();
+          return;
+        }
         if (msg.type === 'openDevtools') {
           if (revealPanel()) {
             vscode.commands.executeCommand('workbench.action.webview.openDeveloperTools');
@@ -261,6 +284,48 @@ function activate(context) {
             console.error(err);
             out.appendLine('[updateNode error] ' + (err && err.stack ? err.stack : (err && err.message ? err.message : String(err))));
             vscode.window.showErrorMessage('Failed to update node: ' + (err.message || String(err)));
+          }
+          return;
+        }
+
+        if (msg.type === 'startWork') {
+          const { id, readiness, log } = msg.payload || {};
+          const node = nodes.find(n => n.id === id);
+          if (!node) return;
+          try {
+            const current = fs.readFileSync(node.filePath, 'utf8');
+            const parsed = matter(current);
+            const data = { ...(parsed.data || {}) };
+            const newStatus = 'in-progress';
+            const existingReady = Number.isFinite(Number(data.readiness)) ? Number(data.readiness) : 0;
+            let newReady = Number.isFinite(Number(readiness)) ? Number(readiness) : existingReady;
+            newReady = Math.max(existingReady, Math.max(0, Math.min(1, newReady || 0.1)));
+            data.status = newStatus;
+            data.readiness = Number(newReady.toFixed(2));
+            const newBody = parsed.content || '';
+            const serialized = matter.stringify(newBody, data);
+            fs.writeFileSync(node.filePath, serialized, 'utf8');
+
+            // Update progress log if available
+            const progressNode = nodes.find(n => (n.type || '').toLowerCase() === 'progress' || n.id === 'progress-log');
+            if (progressNode && progressNode.filePath && fs.existsSync(progressNode.filePath)) {
+              const progText = fs.readFileSync(progressNode.filePath, 'utf8');
+              const progParsed = matter(progText);
+              const progBody = progParsed.content || '';
+              const line = log && String(log).trim().length ? `${dateIso()}: ${log.trim()}` : `${dateIso()}: Started ${node.title || node.id}`;
+              const updatedBody = appendToSection(progBody, 'Log', line);
+              const serializedProg = matter.stringify(updatedBody, progParsed.data || {});
+              fs.writeFileSync(progressNode.filePath, serializedProg, 'utf8');
+            }
+
+            mem = loadMemory(root, cfgPath);
+            nodes = mem.nodes;
+            update();
+            panel.webview.postMessage({ type: 'started', payload: { id } });
+          } catch (err) {
+            console.error(err);
+            out.appendLine('[startWork error] ' + (err && err.stack ? err.stack : (err && err.message ? err.message : String(err))));
+            vscode.window.showErrorMessage('Failed to start work: ' + (err.message || String(err)));
           }
         }
 

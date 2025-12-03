@@ -7,17 +7,26 @@
   let memoryDirExists = true;
   let memoryDir = '';
 
+  const rootEl = document.querySelector('.root');
   const tree = document.getElementById('tree');
   const details = document.getElementById('details');
   const graph = document.getElementById('graph');
   const filter = document.getElementById('filter');
   const groupBySel = document.getElementById('groupBy');
+  const themeToggle = document.getElementById('themeToggle');
   const rightbar = document.getElementById('rightbar');
+  const splitter = document.getElementById('splitter');
   const progressWidget = document.getElementById('progressWidget');
   const banner = document.getElementById('banner');
   const devbar = document.getElementById('devbar');
   let features = { graphEnabled: true, markdownPreviewEnabled: true };
   let graphRaf = null;
+  let sidebarWidth = 280;
+  let theme = 'light';
+  let lastPrimarySelection = null;
+
+  // Signal readiness so the extension can re-send data after reloads
+  try { vscode.postMessage({ type: 'ready' }); } catch (_) {}
 
   // Restore UI state (selected node, filter, groupBy)
   let __state = {};
@@ -25,17 +34,57 @@
   if (filter && __state.filter) filter.value = __state.filter;
   if (groupBySel && __state.groupBy) groupBySel.value = __state.groupBy;
   if (__state.selected) selected = __state.selected;
+  if (typeof __state.sidebarWidth === 'number' && Number.isFinite(__state.sidebarWidth)) {
+    sidebarWidth = __state.sidebarWidth;
+  }
+  if (typeof __state.theme === 'string') {
+    theme = __state.theme === 'dark' ? 'dark' : 'light';
+  } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+    theme = 'dark';
+  }
 
   function saveState() {
     try {
       const st = {
         selected,
         filter: filter ? filter.value : '',
-        groupBy: groupBySel ? groupBySel.value : 'none'
+        groupBy: groupBySel ? groupBySel.value : 'none',
+        sidebarWidth,
+        theme
       };
       vscode.setState && vscode.setState(st);
     } catch (_) {}
   }
+
+  function clampSidebarWidth(px) {
+    const min = 200;
+    const max = 520;
+    const n = Number(px);
+    if (!Number.isFinite(n)) return sidebarWidth;
+    return Math.max(min, Math.min(max, Math.round(n)));
+  }
+  function applySidebarWidth(persist = false) {
+    sidebarWidth = clampSidebarWidth(sidebarWidth);
+    if (rightbar) rightbar.style.width = `${sidebarWidth}px`;
+    try { document.documentElement.style.setProperty('--sidebar-width', `${sidebarWidth}px`); } catch (_) {}
+    if (persist) saveState();
+    try { renderGraph(); } catch (_) {}
+  }
+  applySidebarWidth(false);
+
+  function applyTheme(next, persist = false) {
+    theme = next === 'dark' ? 'dark' : 'light';
+    try {
+      document.documentElement.setAttribute('data-theme', theme);
+    } catch (_) {}
+    if (themeToggle) {
+      themeToggle.textContent = theme === 'dark' ? 'Light mode' : 'Dark mode';
+    }
+    if (persist) saveState();
+    try { renderGraph(); } catch (_) {}
+    try { renderProgressWidget(); } catch (_) {}
+  }
+  applyTheme(theme, false);
 
   function postLog(level, message, error) {
     // Append to in-view debug log (if visible)
@@ -266,13 +315,35 @@
           <h4>Log (recent)</h4>
           ${mkList(logRaw, 'explain')}
         </div>
-        <div id="progressExplain" style="margin-top:8px;"></div>
+        <div style="margin-top:8px;">
+          <div id="progressExplain"></div>
+          <div style="margin-top:6px;">
+            <button id="progressBack" class="btn-ghost">Back to main view</button>
+          </div>
+        </div>
       `;
     } else {
       html = '<div style="color:#777;">No progress log found.</div>';
     }
     progressWidget.innerHTML = html;
   }
+
+  const statusPalette = {
+    light: {
+      done: '#22c55e',
+      'in-progress': '#f59e0b',
+      blocked: '#ef4444',
+      planned: '#9ca3af',
+      default: '#6b7280'
+    },
+    dark: {
+      done: '#4ade80',
+      'in-progress': '#facc15',
+      blocked: '#f87171',
+      planned: '#94a3b8',
+      default: '#9ca3af'
+    }
+  };
 
   function statusIcon(s) {
     switch ((s || '').toLowerCase()) {
@@ -316,13 +387,17 @@
         row.className = 'tree-row' + (n.id === selected ? ' selected' : '');
         const title = document.createElement('div');
         title.className = 'tree-title';
-        title.textContent = `${n.title} ${statusIcon(n.status)}`;
+        title.textContent = n.title;
         title.onclick = () => select(n.id);
         const pct = document.createElement('div');
         pct.className = 'tree-pct';
         pct.textContent = fmtReadiness(n.readiness);
+        const status = document.createElement('div');
+        status.className = 'tree-status';
+        status.textContent = statusIcon(n.status);
         row.appendChild(title);
         row.appendChild(pct);
+        row.appendChild(status);
         tree.appendChild(row);
       });
       return;
@@ -348,19 +423,26 @@
         row.style.marginLeft = '8px';
         const title = document.createElement('div');
         title.className = 'tree-title';
-        title.textContent = `${n.title} ${statusIcon(n.status)}`;
+        title.textContent = n.title;
         title.onclick = () => select(n.id);
         const pct = document.createElement('div');
         pct.className = 'tree-pct';
         pct.textContent = fmtReadiness(n.readiness);
+        const status = document.createElement('div');
+        status.className = 'tree-status';
+        status.textContent = statusIcon(n.status);
         row.appendChild(title);
         row.appendChild(pct);
+        row.appendChild(status);
         tree.appendChild(row);
       });
     });
   }
 
   function select(id) {
+    if (selected && selected !== id) {
+      lastPrimarySelection = selected;
+    }
     selected = id;
     saveState();
     try { renderTree(); } catch (e) { showBanner('renderTree failed'); postLog('error', 'renderTree failed', e); }
@@ -373,6 +455,13 @@
     if (!n) { details.innerHTML = 'Select item'; return; }
 
     details.innerHTML = `
+      <div class="detail-header">
+        <button id="backMain" class="back-btn" title="Return to main list">← Back to main view</button>
+        <div class="detail-title">
+          <div style="font-weight:700;">${escapeHtml(n.title)}</div>
+          <div class="detail-id"><code>${n.id}</code></div>
+        </div>
+      </div>
       <div id="err" style="color:#d33;"></div>
       <div id="ok" style="color:#090;"></div>
 
@@ -408,6 +497,7 @@
 
       <div class="row-actions">
         <button id="save">Save</button>
+        <button id="startWork">Start work</button>
         <button id="open">Open File</button>
       </div>
 
@@ -419,6 +509,20 @@
 
     const err = document.getElementById('err');
     const target = document.getElementById('preview');
+    const backBtn = document.getElementById('backMain');
+    if (backBtn) {
+      backBtn.onclick = () => {
+        const exp = document.getElementById('progressExplain');
+        if (exp) exp.innerHTML = '';
+        filter.value = '';
+        renderTree();
+        if (lastPrimarySelection && byId[lastPrimarySelection]) {
+          select(lastPrimarySelection);
+        } else if (nodes.length) {
+          select(nodes[0].id);
+        }
+      };
+    }
     if (typeof n.body === 'undefined') {
       try { target.textContent = '(loading…)'; } catch (_) {}
       try { vscode.postMessage({ type: 'fetchBody', payload: { id: n.id } }); } catch (_) {}
@@ -470,6 +574,26 @@
         }
       });
     };
+    const startBtn = document.getElementById('startWork');
+    if (startBtn) {
+      if ((n.status || '').toLowerCase() === 'in-progress') {
+        startBtn.disabled = true;
+        startBtn.textContent = 'In progress';
+      }
+      startBtn.onclick = () => {
+        err.textContent = '';
+        const readinessInput = document.getElementById('r');
+        const currentReadiness = Number(readinessInput.value);
+        vscode.postMessage({
+          type: 'startWork',
+          payload: {
+            id: n.id,
+            readiness: Number.isFinite(currentReadiness) ? currentReadiness : undefined,
+            log: `Started ${n.title || n.id}`
+          }
+        });
+      };
+    }
     document.getElementById('open').onclick = () => {
       vscode.postMessage({ type: 'openFile', payload: { filePath: n.filePath }});
     };
@@ -490,6 +614,17 @@
     }
     const centerX = Math.floor(width / 2);
     const centerY = Math.floor(height / 2);
+    let panelBg = '#fff';
+    let panelBorder = '#ddd';
+    let textColor = '#111';
+    let mutedColor = '#444';
+    try {
+      const style = getComputedStyle(document.documentElement);
+      panelBg = (style.getPropertyValue('--panel-bg') || panelBg).trim();
+      panelBorder = (style.getPropertyValue('--panel-border') || panelBorder).trim();
+      textColor = (style.getPropertyValue('--text') || textColor).trim();
+      mutedColor = (style.getPropertyValue('--muted') || mutedColor).trim();
+    } catch (_) {}
 
     // Build nodes and links for interactive SVG
     const nodesArr = [];
@@ -528,17 +663,13 @@
     const svg = document.createElementNS(ns, 'svg');
     svg.setAttribute('width', String(width));
     svg.setAttribute('height', String(height));
-    svg.style.border = '1px solid #ccc';
-    svg.style.background = '#fff';
+    svg.style.border = `1px solid ${panelBorder}`;
+    svg.style.background = panelBg;
 
     function statusColor(s) {
-      switch ((s || '').toLowerCase()) {
-        case 'done': return '#2ecc71';
-        case 'in-progress': return '#f1c40f';
-        case 'blocked': return '#e74c3c';
-        case 'planned': return '#95a5a6';
-        default: return '#7f8c8d';
-      }
+      const palette = statusPalette[theme] || statusPalette.light;
+      const key = (s || '').toLowerCase();
+      return palette[key] || palette.default;
     }
 
     // Links
@@ -551,7 +682,7 @@
       line.setAttribute('y1', String(from.y));
       line.setAttribute('x2', String(to.x));
       line.setAttribute('y2', String(to.y));
-      line.setAttribute('stroke', '#999');
+      line.setAttribute('stroke', panelBorder || '#999');
       line.setAttribute('stroke-width', '1.5');
       svg.appendChild(line);
     });
@@ -575,7 +706,7 @@
       label.setAttribute('y', nd.role === 'self' ? '-20' : '-16');
       label.setAttribute('text-anchor', 'middle');
       label.setAttribute('font-size', '12');
-      label.setAttribute('fill', '#111');
+      label.setAttribute('fill', textColor || '#111');
       label.textContent = nd.title && nd.title.length > 22 ? nd.title.slice(0, 21) + '…' : (nd.title || nd.id);
       g.appendChild(label);
 
@@ -584,7 +715,7 @@
       idLabel.setAttribute('y', nd.role === 'self' ? '30' : '26');
       idLabel.setAttribute('text-anchor', 'middle');
       idLabel.setAttribute('font-size', '10');
-      idLabel.setAttribute('fill', '#444');
+      idLabel.setAttribute('fill', mutedColor || '#444');
       idLabel.textContent = nd.id;
       g.appendChild(idLabel);
 
@@ -639,21 +770,26 @@
       const text = t.getAttribute('data-text') || '';
       if (act === 'filter') {
         const needle = (text || '').toLowerCase();
-        const match = nodes.find(n =>
-          (n.title && n.title.toLowerCase().includes(needle)) ||
-          (n.id && n.id.toLowerCase().includes(needle))
-        );
-        if (match) {
-          select(match.id);
-        } else {
-          filter.value = text;
-          renderTree();
-        }
-      } else if (act === 'explain') {
-        const exp = document.getElementById('progressExplain');
-        if (exp) {
-          let html = text;
-          if (window.marked && typeof marked.parse === 'function') {
+          const match = nodes.find(n =>
+            (n.title && n.title.toLowerCase().includes(needle)) ||
+            (n.id && n.id.toLowerCase().includes(needle))
+          );
+          if (match) {
+            select(match.id);
+          } else {
+            filter.value = text;
+            renderTree();
+            const secondaryMatch = nodes.find(n =>
+              (n.title && n.title.toLowerCase().includes(needle)) ||
+              (n.id && n.id.toLowerCase().includes(needle))
+            );
+            if (secondaryMatch) select(secondaryMatch.id);
+          }
+        } else if (act === 'explain') {
+          const exp = document.getElementById('progressExplain');
+          if (exp) {
+            let html = text;
+            if (window.marked && typeof marked.parse === 'function') {
             try {
               html = marked.parse(text);
               if (window.DOMPurify && typeof DOMPurify.sanitize === 'function') {
@@ -707,6 +843,62 @@
       showBanner('Copy failed');
     }
   });
+
+  if (themeToggle) {
+    themeToggle.addEventListener('click', () => {
+      applyTheme(theme === 'dark' ? 'light' : 'dark', true);
+    });
+  }
+
+  // Sidebar resize
+  if (splitter && rootEl && rightbar) {
+    let dragging = false;
+    const onMove = ev => {
+      if (!dragging) return;
+      ev.preventDefault();
+      const rect = rootEl.getBoundingClientRect();
+      const newWidth = rect.right - ev.clientX;
+      sidebarWidth = clampSidebarWidth(newWidth);
+      applySidebarWidth(true);
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    };
+    const endDrag = () => {
+      if (!dragging) return;
+      dragging = false;
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', endDrag);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    splitter.addEventListener('mousedown', ev => {
+      dragging = true;
+      ev.preventDefault();
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', endDrag);
+    });
+    splitter.addEventListener('dblclick', () => {
+      sidebarWidth = 280;
+      applySidebarWidth(true);
+    });
+  }
+
+  // Progress back-to-main
+  if (progressWidget) {
+    progressWidget.addEventListener('click', ev => {
+      const backBtn = ev.target.closest('#progressBack');
+      if (!backBtn) return;
+      const exp = document.getElementById('progressExplain');
+      if (exp) exp.innerHTML = '';
+      filter.value = '';
+      renderTree();
+      if (lastPrimarySelection && byId[lastPrimarySelection]) {
+        select(lastPrimarySelection);
+      } else if (nodes.length) {
+        select(nodes[0].id);
+      }
+    });
+  }
 
   // Re-render graph on resize
   if (window.ResizeObserver && graph) {
@@ -764,6 +956,21 @@
         if (p && p.id === id) {
           try { renderProgressWidget(); } catch (e) { postLog('error', 'renderProgressWidget after body load', e); }
         }
+      }
+    } else if (e.data.type === 'started') {
+      if (e.data.payload && e.data.payload.id === selected) {
+        const ok = document.getElementById('ok');
+        if (ok) {
+          ok.textContent = 'Started and logged';
+          setTimeout(() => { ok.textContent = ''; }, 1500);
+        }
+        // Refresh view to reflect new status
+        try { renderTree(); } catch (_) {}
+        try { renderDetails(); } catch (_) {}
+        try { renderProgressWidget(); } catch (_) {}
+      } else {
+        // For non-selected, refresh summary lists
+        try { renderProgressWidget(); } catch (_) {}
       }
     }
   });

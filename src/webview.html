@@ -5,38 +5,114 @@
   %CSP%
   <title>Memory Bank</title>
   <style>
-    .root { display: flex; gap: 12px; align-items: flex-start; }
-    .left { flex: 1 1 auto; min-width: 0; }
-    .right { width: 280px; border-left: 1px solid #ccc; padding-left: 8px; overflow: auto; height: 100%; }
-    #graph { min-height: 320px; border: 1px solid #ccc; width: 100%; }
-    #tree div { padding: 2px 0; }
-    .badge { background: #eee; border-radius: 8px; padding: 0 6px; font-size: 11px; margin-left: 4px; }
+    :root {
+      --sidebar-width: 280px;
+      --bg: #f5f7fb;
+      --text: #0f172a;
+      --muted: #4b5563;
+      --panel-bg: #ffffff;
+      --panel-border: #e5e7eb;
+      --shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+      --accent: #2563eb;
+      --accent-soft: #e0e7ff;
+      --chip-bg: #eef2ff;
+      --chip-text: #1e3a8a;
+      --danger: #ef4444;
+      --info: #2563eb;
+      --banner-bg: #fef2f2;
+      --banner-text: #b91c1c;
+    }
+    [data-theme="dark"] {
+      --bg: #0f172a;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --panel-bg: #111827;
+      --panel-border: #1f2937;
+      --shadow: 0 8px 24px rgba(0,0,0,0.4);
+      --accent: #60a5fa;
+      --accent-soft: #1e293b;
+      --chip-bg: #1e293b;
+      --chip-text: #bfdbfe;
+      --danger: #f87171;
+      --info: #60a5fa;
+      --banner-bg: #1f2937;
+      --banner-text: #fca5a5;
+    }
+    body {
+      margin: 0;
+      padding: 12px 14px 16px;
+      background: radial-gradient(circle at 20% 20%, rgba(37,99,235,0.05), transparent 40%), radial-gradient(circle at 80% 0%, rgba(16,185,129,0.06), transparent 35%), var(--bg);
+      color: var(--text);
+      font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+    }
+    h2, h3, h4 { margin: 0 0 8px; color: var(--text); }
+    input, select, button {
+      border-radius: 8px;
+      border: 1px solid var(--panel-border);
+      background: var(--panel-bg);
+      color: var(--text);
+      padding: 6px 8px;
+      font-size: 13px;
+    }
+    button { cursor: pointer; transition: transform 0.05s ease, box-shadow 0.15s ease; }
+    button:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
+    button:active { transform: translateY(0); }
+    .btn-ghost { background: transparent; border-color: var(--panel-border); }
+    .root {
+      display: grid;
+      grid-template-columns: 1fr auto var(--sidebar-width);
+      gap: 12px;
+      align-items: flex-start;
+    }
+    .left { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+    .panel { background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 12px; padding: 12px; box-shadow: var(--shadow); }
+    .splitter { width: 8px; cursor: col-resize; border-radius: 6px; background: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(0,0,0,0.04)); border: 1px solid var(--panel-border); align-self: stretch; }
+    .splitter:hover { background: linear-gradient(180deg, rgba(255,255,255,0.2), rgba(0,0,0,0.08)); }
+    .right { width: var(--sidebar-width); overflow: auto; height: 100%; }
+    #graph { min-height: 320px; border-radius: 12px; border: 1px solid var(--panel-border); width: 100%; overflow: hidden; box-shadow: var(--shadow); }
+    #tree { padding: 6px; }
+    .badge { background: var(--chip-bg); color: var(--chip-text); border-radius: 10px; padding: 2px 8px; font-size: 11px; margin-left: 4px; border: 1px solid var(--panel-border); }
     .pw-section h4 { margin: 8px 0 4px; }
     .pw-item { cursor: pointer; padding: 2px 0; }
-    .pw-item:hover { text-decoration: underline; }
-    #banner { position: sticky; top: 0; background: #fee; color: #900; border: 1px solid #d99; padding: 6px; display: none; z-index: 1; }
-    #banner.info { background: #eef5ff; color: #114a8b; border-color: #a3c3ff; }
-    #devbar { display:flex; gap:6px; align-items:center; font-size:12px; margin-bottom:8px; }
-    #devbar button { font-size:12px; padding:2px 6px; }
+    .pw-item-row { padding: 6px 8px; border-radius: 10px; transition: background 0.15s ease; }
+    .pw-item-row:hover { background: var(--accent-soft); }
+    .pw-item:hover { text-decoration: none; }
+    #banner { position: sticky; top: 0; background: var(--banner-bg); color: var(--banner-text); border: 1px solid var(--banner-text); padding: 8px; display: none; z-index: 1; border-radius: 10px; }
+    #banner.info { background: var(--accent-soft); color: var(--info); border-color: var(--info); }
+    #devbar { display:flex; gap:6px; align-items:center; font-size:12px; margin-bottom:8px; color: var(--muted); }
+    #devbar button { font-size:12px; padding:4px 8px; }
     /* Tabular details layout */
     .kv { display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px; align-items: center; }
     .kv-row { display: contents; }
-    .kv-label { color: #555; font-weight: 600; }
+    .kv-label { color: var(--muted); font-weight: 600; }
     .kv-value input, .kv-value select { width: 100%; }
     .row-actions { margin-top: 8px; display: flex; gap: 8px; }
 
     /* Chips / badges */
-    .chip { display: inline-block; padding: 0 6px; border-radius: 10px; background: #eef; color: #114a8b; font-size: 11px; margin-left: 4px; }
-    .chip-prio { background: #ffe9cc; color: #8a4b00; }
+    .chip { display: inline-block; padding: 0 6px; border-radius: 10px; background: var(--chip-bg); color: var(--chip-text); font-size: 11px; margin-left: 4px; border: 1px solid var(--panel-border); }
+    .chip-prio { background: #fef3c7; color: #92400e; }
+    [data-theme="dark"] .chip-prio { background: #1f2937; color: #facc15; }
     .pw-item-row { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
     .pw-item-text { flex: 1 1 auto; min-width: 0; }
     .pw-item-tags { flex: 0 0 auto; white-space: nowrap; }
 
-    /* Tree rows: title + fixed-width percentage column */
-    .tree-row { display: grid; grid-template-columns: 1fr 60px; gap: 8px; align-items: center; padding: 2px 0; }
+    /* Tree rows: title + readiness + status icon aligned to the right */
+    .tree-row { display: grid; grid-template-columns: 1fr 60px 26px; gap: 8px; align-items: center; padding: 6px 8px; border-radius: 10px; transition: background 0.15s ease, transform 0.05s ease; }
+    .tree-row:hover { background: var(--accent-soft); transform: translateY(-1px); }
     .tree-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
-    .tree-pct { text-align: right; color: #666; font-variant-numeric: tabular-nums; width: 60px; }
-    .tree-row.selected .tree-title { font-weight: bold; }
+    .tree-pct { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; width: 60px; }
+    .tree-status { text-align: right; width: 26px; }
+    .tree-row.selected { outline: 2px solid var(--accent); outline-offset: 0; }
+    .tree-row.selected .tree-title { font-weight: 700; }
+
+    hr { border: 0; border-top: 1px solid var(--panel-border); margin: 8px 0; }
+
+    /* Detail header */
+    .detail-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+    .back-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--panel-border); background: var(--panel-bg); color: var(--text); font-weight: 600; }
+    .back-btn:hover { background: var(--accent-soft); }
+    .detail-title { display: flex; flex-direction: column; gap: 2px; }
+    .detail-id { color: var(--muted); font-size: 12px; }
   </style>
 </head>
 <body>
@@ -59,25 +135,26 @@
           <option value="status">Status</option>
           <option value="readiness">Readiness bands</option>
         </select>
+        <button id="themeToggle" class="btn-ghost" title="Toggle light/dark">Dark mode</button>
       </div>
       <div style="margin:6px 0;">
         <button id="debugToggle" title="Show/Hide debug panel">Debug</button>
       </div>
-      <div id="debugPanel" style="display:none; border:1px solid #ccc; padding:6px; background:#fafafa;">
+      <div id="debugPanel" class="panel" style="display:none; padding:6px;">
         <div style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
           <button id="debugReload">Reload view</button>
           <button id="debugCopy">Copy logs</button>
-          <span id="debugInfo" style="color:#555; font-size:12px;"></span>
+          <span id="debugInfo" style="color:var(--muted); font-size:12px;"></span>
         </div>
         <pre id="debugLog" style="max-height:160px; overflow:auto; background:#fff; border:1px solid #ddd; padding:6px; margin:0;"></pre>
       </div>
-      <div id="tree"></div>
-      <hr>
-      <div id="details"></div>
+      <div id="tree" class="panel"></div>
+      <div id="details" class="panel"></div>
       <hr>
       <div id="graph"></div>
     </div>
-    <div class="right" id="rightbar">
+    <div id="splitter" class="splitter" title="Drag to resize sidebar" aria-label="Resize sidebar" role="separator"></div>
+    <div class="right panel" id="rightbar">
       <h3 style="margin:4px 0 8px;">Progress</h3>
       <div id="progressWidget"></div>
     </div>

@@ -10,9 +10,7 @@ tags: [progress, kanban]
 
 ## Backlog
 - Regression test: memoryBank.path handling when workspace root is memory-bank; ensure no duplicated path or watcher pattern
-- Persist UI state (selected node, filter, groupBy) via webview state
 - Settings/configuration: memoryBank.path, features.graphEnabled/markdownPreviewEnabled, refresh.debounceMs
-- Lazy-load bodies: frontmatter-only init; fetchBody on selection; per-file cache
 - Keyboard navigation and ARIA roles/labels; focus management
 - Error surfacing polish: inline messages and banner actions (Retry, Open file); OutputChannel prefixes
 - Performance: cache frontmatter, batch updates to webview, avoid re-render storms
@@ -21,10 +19,14 @@ tags: [progress, kanban]
 - Testing: unit tests (frontmatter round-trip, validation), manual smoke/e2e checklist
 - CI workflow: lint/format, vsce package, artifact upload
 - Optional: Mermaid/D3 visualization variant
+- Start-work flow for progress items (from main detail view):
+  - Treat progress sidebar entries as actionable targets; select matching node in main list.
+  - In details panel, surface a “Start work” CTA that (a) bumps status to `in-progress`, (b) optionally stamps readiness, (c) writes a brief log line to progress.md.
+  - Preserve markdown body; only mutate frontmatter/status/readiness; confirm with toast/banner.
+  - Add telemetry-free, undo-friendly behavior (no auto-branching).
 
 ## In Progress
-- UI state persistence and settings wiring
-- Plan and scaffold for lazy-load of markdown bodies (fetch on select)
+- Settings wiring polish and watcher regression test scaffolding
 
 ## Done
 - README architecture captured as projectbrief.md
@@ -54,6 +56,11 @@ tags: [progress, kanban]
 - Topic list (left): tabulated rows with fixed-width percentage column for aligned presentation
 - Progress sidebar: lazy-load of progress.md body with loading state; lists render reliably after fetch
 - ResizeObserver noise: suppressed benign loop warnings; re-render now scheduled via requestAnimationFrame to avoid errors
+- Persistent UI state (selected node, filter, groupBy); reload handshake restores init data
+- Lazy-load bodies with per-node cache; refreshed after writes
+- Modernized UI with light/dark themes, panel styling, and theme-aware graph colors
+- Resizable sidebar with draggable splitter; graph resizes accordingly
+- Status icons aligned in list rows; sidebar chips + filters still functional
 
 ## Log
 - 2025-11-26: Initialized memory bank plan and structure.
@@ -68,3 +75,4 @@ tags: [progress, kanban]
 - 2025-12-02: UI polish—tabular details layout; prioritized Backlog (P1/P2/P3) with subsystem badges and chip navigation.
 - 2025-12-02: Fixed regression for duplicated memory-bank path when workspace root is memory-bank; normalized loadMemory and watcher pattern; added backlog item for regression test.
 - 2025-12-02: UI tabulation for topic list (aligned percentages), ensured Progress lists load (lazy fetch), and suppressed top ResizeObserver error via rAF + ignore rule.
+- 2025-12-03: Added theme toggle (light/dark) with modern styling; theme-aware graph; resizable sidebar; reload-ready handshake; persisted UI state and lazy body cache.
